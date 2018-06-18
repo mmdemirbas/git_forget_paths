@@ -26,14 +26,6 @@ target_remote_url=https://github.com/Kotlin/kotlin-koans-trimmed.git
 #                                                                                     #
 #######################################################################################
 
-assert_equals() {
-    if [ "$1" == "$2" ]; then
-        echo -e "[\033[0;92mSUCCESS\033[0m] $2 == $1"
-    else
-        echo -e "[\033[0;31mFAILURE\033[0m] $2 != $1"
-    fi
-}
-
 # checks whether a given array contains the specified element.
 # usage: array_contains element-to-find array-items...
 array_contains() {
@@ -46,12 +38,6 @@ array_contains() {
     done
     echo 0
 }
-
-test_array_contains() {
-    assert_equals 0 $(array_contains sun sunflower sunny goodsun)
-    assert_equals 1 $(array_contains sun sun flower)
-}
-#test_array_contains
 
 # prints file & dir names in the current working except the specified ones.
 # usage: ls_except someDirOrFile anotherDirOrFile ...
@@ -66,8 +52,6 @@ ls_except() {
 # Removes the given paths and related history from the current git repo.
 # CAUTION! This may take very long time and rewrites git history!
 git_forget_paths() {
-    echo "will forget paths: $@"
-
     : mirror original branches &&
     git checkout HEAD~0 2>/dev/null &&
     d=$(printf ' %q' "$@") &&
@@ -91,7 +75,6 @@ git_forget_paths() {
 # Removes all paths EXCEPT the given ones and related history from the current git repo.
 # CAUTION! This may take very long time and rewrites git history!
 git_forget_paths_except() {
-    echo "will keep paths: $@"
     git_forget_paths $(ls_except "$@")
 }
 
