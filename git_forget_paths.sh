@@ -154,6 +154,9 @@ git_push_all_branches_to_origin() {
 #   :
 #)
 
+# TODO
+# Re-cloning the resulting repo may reduce repository size.
+
 #######################################################################################
 #                                                                                     #
 # REFERENCES:                                                                         #
