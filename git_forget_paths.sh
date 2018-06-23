@@ -1,110 +1,170 @@
 #!/usr/bin/env bash
 
+########################################################################################################################
+#                                                                                                                      #
+# AIM:                                                                                                                 #
+#                                                                                                                      #
+# Truncates undesired paths from an existing git repository and deletes the related history.                           #
+# This script can be used to extract a new repository out of an existing repository.                                   #
+# Resulting repository will not be pushed anywhere, so you need to add a remote origin and push there manually.        #
+#                                                                                                                      #
+#                                                                                                                      #
+# USAGE:                                                                                                               #
+#                                                                                                                      #
+# Provide a parameters .sh file which defines the required parameters as argument to the script.                       #
+#                                                                                                                      #
+########################################################################################################################
 
-echo "[WARN] Are you sure?"
-echo "[WARN] Ensure that you change the PARAMETERS section per your needs and uncomment necessary lines in the SCRIPT section."
-echo "[WARN] Afterwards, you can comment out this line to run script." && exit 1
+# ensure that parameters file specified as an argument
+if [[   -z "$1" ]]; then echo "Please, provide the parameters file as argument."; abort; fi
+if [[ ! -e "$1" ]]; then echo "Params file was missing: $1"                     ; abort; fi
+if [[ ! -f "$1" ]]; then echo "Params file was not a regular file: $1"          ; abort; fi
+
+# include the parameters file which defines the required variables
+. "$1"
+
+# ensure that the required variables defined in parameters file
+if [ -z "$source_url_or_path"      ]; then echo "source_url_or_path not defined"              ; abort; fi
+if [ -z "$target_path"             ]; then echo "target_path not defined"                     ; abort; fi
+if [ -z "$top_level_paths_to_keep" ]; then echo "top_level_paths_to_keep not defined"         ; abort; fi
+
+# ensure target_path is an absolute path
+target_path=$(realpath "$target_path")
+
+if [ -f "$target_path" ]; then echo "Target path was a regular file: $target_path"; abort; fi
+
+# internally used file names (no need to change these):
+tmp_path="$target_path.tmp"
+backup_path="$target_path.bak"
+last_commit_old_hash_file="$target_path/.last_commit_old_hash"
+last_commit_new_hash_file="$target_path/.last_commit_new_hash"
+
+########################################################################################################################
+#                                                                                                                      #
+#                                              F U N C T I O N S                                                       #
+#                                                                                                                      #
+########################################################################################################################
+
+abort() {
+    echo "Aborted."
+    exit 1
+}
+
+check_params() {
+    if [ "$#" -eq "0" ]; then
+        printf "  Will create repository at:\n"
+        printf "    $target_path\n"
+        printf "\n"
+        printf "  From this source:\n"
+        printf "    $source_url_or_path\n"
+        printf "\n"
+        printf "  Keep only these files:\n"
+        printf "    %s\n" "${top_level_paths_to_keep[@]}"
+        printf "\n"
+
+        printf "  Then delete also these files:\n"
+        printf "    %s\n" "${relative_paths_to_delete[@]}"
+        printf "\n"
+
+        printf "  Then delete tags matching these patterns:\n"
+        printf "    %s\n" "${tags_to_delete[@]}"
+    else
+        printf "  Will update existing repository at:\n"
+        printf "    $target_path\n"
+        printf "\n"
+        printf "  From this source:\n"
+        printf "    $source_url_or_path\n"
+        printf "\n"
+        printf "  Mapping these commits:\n"
+        printf "    Commit at original remote repository: $1\n"
+        printf "    Commit at existing local repository : $2\n"
+        printf "\n"
+        printf "  Keep only these files:\n"
+        printf "    %s\n" "${top_level_paths_to_keep[@]}"
+        printf "\n"
+
+        printf "  Then delete also these files:\n"
+        printf "    %s\n" "${relative_paths_to_delete[@]}"
+        printf "\n"
+
+        printf "  Then delete tags matching these patterns:\n"
+        printf "    %s\n" "${tags_to_delete[@]}"
+    fi
+
+    printf "\n"
+    printf "  Note that this operation may take too long depending on your repository size.\n"
+    printf "\n"
+    printf "Please, review the information above.\n"
 
 
-#######################################################################################
-#                                                                                     #
-#                                 P A R A M E T E R S                                 #
-#                                                                                     #
-#######################################################################################
+    # confirm with typing letter -- don't require to press enter
+    read -p "Are you sure? [yN] " -n 1 -r
 
-# code base to process:
-source_url_or_path=https://github.com/Kotlin/kotlin-koans.git
+    # move cursor to a new line
+    echo
 
-# an arbitrary non-existant local path to use as clone target:
-target_local_path=kotlin-koans
-
-# top level files and dirs to keep. to be passed to `git_forget_paths_except` function:
-top_level_paths_to_keep=(
-                         "src"
-                         "test"
-                         ".gitignore"
-                         "build.gradle"
-                         )
-
-# relative paths to remove. to be passed to `git_forget_paths` function:
-relative_paths_to_delete=(
-                          "gradle/wrapper"
-                          "gradlew"
-                          "gradlew.bat"
-                          "test/util"
-                          ".idea/runConfigurations/x.xml"
-                          ".idea/runConfigurations/y.xml"
-                          ".idea/runConfigurations/z.xml"
-                         )
-
-# tag patterns to delete (shell patterns using wildcard)
-tags_to_delete=(
-                "*xxx*"
-                "*yyy*"
-                "*zzz*"
-              )
-
-# target git url to push after removing unnecessary paths:
-target_remote_url=https://github.com/Kotlin/kotlin-koans-destructed.git
-
-
-#######################################################################################
-#                                                                                     #
-#                                  F U N C T I O N S                                  #
-#                                                                                     #
-#######################################################################################
+    # abort unless pressed 'Y' or 'y'
+    [[ $REPLY =~ ^[Yy]$ ]] || abort
+}
 
 # checks whether a given array contains the specified element.
-# usage: array_contains element-to-find array-items...
-array_contains() {
-    local needle=$1
+# usage: is_excluded_path element-to-find array-items...
+is_excluded_path() {
+    local path=$1
     shift 1
-    for i in $@; do
-        if [[ $i == $needle ]]; then
-            echo 1
-            return
-        fi
+    for excluded in "$@"; do
+        [[ "$path" == "$excluded" ]] || [[ "${path}" =~ ^${excluded} ]] && echo 1 && return
     done
     echo 0
 }
 
-# prints file & dir names in the current working except the specified ones.
-# usage: ls_except someDirOrFile anotherDirOrFile ...
+# lists top-level files & dirs, ignoring the specified paths.
+# usage: ls_except someRelativePath anotherRelativePath ...
 ls_except() {
     for item in $(ls -A); do
-        if [ "$(array_contains "${item}" "$@")" == "0" ]; then
+        if [ "$(is_excluded_path "${item}" "$@")" == "0" ]; then
             echo $item
         fi
     done
 }
 
+git_delete_tags(){
+    git tag --list "${tags_to_delete[@]}" | xargs git tag -d
+}
+
+git_delete_backups() {
+    rm -rf .git/refs/original
+}
+
+git_forget_history_including() {
+    git filter-branch \
+        --parent-filter "sed \"s/-p $1[0-9a-f]*//\"" \
+        --prune-empty \
+        -- --all
+
+    git_delete_backups
+}
+
 # Removes the given paths and related history from the current git repo.
 # CAUTION! This may take very long time and rewrites git history!
 git_forget_paths() {
-    : mirror original branches                       &&
-    git checkout HEAD~0 2>/dev/null                  &&
-    d=$(printf ' %q' "$@")                           &&
-    git for-each-ref --shell --format='
-      o=%(refname:short) b=${o#origin/} &&
-      if test -n "$b" && test "$b" != HEAD; then
-        git branch --force --no-track "$b" "$o"
-      fi
-    ' refs/remotes/origin/ | sh -e                   &&
-    git checkout -                                   &&
-    git remote rm origin
+    # use a temp file to prevent 'Argument line too long' error
+    local tmp_paths=$(realpath ".paths-to-forget.tmp")
+    printf "%q " "$@" > "$tmp_paths"
 
-    : do the filtering                               &&
     git filter-branch \
-      --index-filter 'git rm --ignore-unmatch --cached -r -- '"$d" \
+      --index-filter "cat '$tmp_paths' | xargs git rm --ignore-unmatch --cached -r --" \
       --tag-name-filter cat \
       --prune-empty \
       -- --all
+
+    git_delete_backups
+    rm "$tmp_paths"
 }
 
-# Removes all paths EXCEPT the given ones and related history from the current git repo.
-# CAUTION! This may take very long time and rewrites git history!
-git_forget_paths_except() {
-    git_forget_paths $(ls_except "$@")
+git_truncate_history(){
+  git_forget_paths $(ls_except "${top_level_paths_to_keep[@]}")
+  git_forget_paths "${relative_paths_to_delete[@]}"
 }
 
 # Performs some house-keeping tasks on the current git repo.
@@ -116,53 +176,160 @@ git_cleanup() {
     git prune
 }
 
-# Runs git push command for each local branch of the current git repo.
-git_push_all_branches_to_origin() {
-    git push origin master
+git_first_commit_hash() {
+    git log "${1:-master}" --format=%H | tail -1
+}
 
-    for branch in `git branch | grep -v '\*'`
-    do
-        git push origin $branch
-    done
+git_last_commit_hash() {
+    git log "${1:-master}" --format=%H | head -1
+}
+
+git_last_commit_time() {
+    git show "${1:-master}" -s --format=%ci HEAD
+}
+
+# clones and truncates a repository for the first time.
+# CAUTION: This process may take very long (hours) depending on your repository size!
+initiate() {
+    local DATE=`date '+%Y-%m-%d_%H-%M-%S'`
+    local tmp="$tmp_path/$DATE"
+
+    git clone "$source_url_or_path" "$tmp/0"                                                                          &&
+    cd "$tmp/0"                                                                                                       &&
+
+    # note the old hash to use later in 'update' method
+    local last_commit_old_hash=$(git_last_commit_hash)                                                                &&
+
+    # remove redundancy
+    git_delete_tags                                                                                                   &&
+    git_cleanup                                                                                                       &&
+    git remote rm origin                                                                                              &&
+    git_truncate_history                                                                                              &&
+    git_cleanup                                                                                                       &&
+
+    # re-cloning generally reduces the repo size
+    cd -                                                                                                              &&
+    git clone "$tmp/0" "$tmp/1"                                                                                       &&
+
+    # clone to the target at the end
+    git clone "$tmp/1" "$target_path"                                                                                 &&
+    cd "$target_path"                                                                                                 &&
+    git remote rm origin                                                                                              &&
+
+    # note the new hash to use later in 'update' method
+    local last_commit_new_hash=$(git_last_commit_hash)                                                                &&
+    cd -                                                                                                              &&
+
+    # save noted commit hashes
+    echo "$last_commit_old_hash" > "$last_commit_old_hash_file"                                                       &&
+    echo "$last_commit_new_hash" > "$last_commit_new_hash_file"                                                       &&
+
+    # remove temp files
+    rm -rf "$tmp"                                                                                                     &&
+    rmdir "$tmp_path"                                                                                                 &&
+    :
+}
+
+# appends updates to the previously initiated repository as a branch
+update() {
+    local DATE=`date '+%Y-%m-%d_%H-%M-%S'`
+    local tmp="$tmp_path/$DATE"
+
+    # detect latest commit date to shorten cloning process
+    cd "$target_path"                                                                                                 &&
+    local last_commit_time=$(git_last_commit_time)                                                                    &&
+    cd -                                                                                                              &&
+
+    # clone remote repo after the last processed commit
+    echo "Cloning the original repo changes after $last_commit_time"                                                  &&
+    git clone "$source_url_or_path" "$tmp/0" --shallow-since="$last_commit_time"                                      &&
+    cd "$tmp/0"                                                                                                       &&
+
+    # note the old hash to update previously noted one at the end
+    local last_commit_old_hash=$(git_last_commit_hash)                                                                &&
+
+    # remove redundancy
+    git_delete_tags                                                                                                   &&
+    git_cleanup                                                                                                       &&
+    git remote rm origin                                                                                              &&
+    git_forget_history_including "$(head -1 "$last_commit_old_hash_file")"                                            &&
+    git_truncate_history                                                                                              &&
+    git_cleanup                                                                                                       &&
+
+    # re-cloning generally reduces the repo size
+    cd -                                                                                                              &&
+    git clone "$tmp/0" "$tmp/1"                                                                                       &&
+
+    # note the new hash to update previously noted one at the end
+    cd "$tmp/1"                                                                                                       &&
+    local last_commit_new_hash=$(git_last_commit_hash)                                                                &&
+    cd -                                                                                                              &&
+
+    # Create backup
+    echo "Creating backup at $backup_path/$DATE"                                                                      &&
+    mkdir -p "$backup_path"                                                                                           &&
+    cp -R "$target_path" "$backup_path/$DATE"                                                                         &&
+
+    # go to the initial repo
+    cd "$target_path"                                                                                                 &&
+
+    # go back to the graft point and start a branch from there
+    git stash
+    git checkout $(head -1 "$last_commit_new_hash_file")                                                              &&
+    git checkout -b "$DATE"                                                                                           &&
+
+    # obtain new changes and append to the history of the branch
+    remote_name="$DATE"
+    remote_branch="$remote_name/master"                                                                               &&
+    git remote add "$remote_name" "$tmp/1"                                                                            &&
+    git fetch --all                                                                                                   &&
+    # git replace [-f] --graft <commit> [<parent>...]
+    git replace --graft $(git_first_commit_hash "$remote_branch") HEAD                                                &&
+    git reset --hard "$remote_branch"                                                                                 &&
+    git_delete_backups                                                                                                &&
+    git remote rm "$remote_name"                                                                                      &&
+
+    # back to the starting directory
+    cd -                                                                                                              &&
+
+    # update noted commit hashes
+    echo "$last_commit_old_hash" > "$last_commit_old_hash_file"                                                       &&
+    echo "$last_commit_new_hash" > "$last_commit_new_hash_file"                                                       &&
+
+    # remove temp files
+    rm -rf "$tmp"                                                                                                     &&
+    rmdir "$tmp_path"                                                                                                 &&
+    :
 }
 
 
-#######################################################################################
-#                                                                                     #
-#                                      S C R I P T                                    #
-#                                                                                     #
-#######################################################################################
+if [ ! -d "$target_path" ]
+then
+    # If target path doesn't exist, use `initiate` to create a repository for the first time
+    check_params
+    initiate
 
-#git clone "$source_url_or_path" "$target_local_path"           &&
-#(
-#    cd "$target_local_path"                                    &&
-#
-#    ## if you want to specify files to remove instead of files to keep,
-#    ## use `git_forget_paths` instead of `git_forget_paths_except`:
-#    #git_forget_paths_except ${top_level_paths_to_keep[@]}       &&
-#    #git_forget_paths ${relative_paths_to_delete[@]}            &&
-#
-#    ## optional clean-up phase
-#    #git_cleanup                                                &&
-#
-#    ## remove unnecessary tags
-#    #git tag --list ${tags_to_delete[@]} | xargs git tag -d     &&
-#
-#    ## push to new origin
-#    #git remote add origin "$target_remote_url"                 &&
-#    #git_push_all_branches_to_origin                            &&
-#   :
-#)
+elif [ ! -f "$last_commit_old_hash_file" ] || [ ! -f "$last_commit_new_hash_file" ]
+then
+    echo "Following files must exist to update the repository:"
+    echo "  $last_commit_old_hash_file"
+    echo "  $last_commit_new_hash_file"
+    abort
 
-# TODO
-# Re-cloning the resulting repo may reduce repository size.
+else
+    # If both the target path and the required commit hash information exist,
+    # use `update` to create a branch with the new changes made to the original repository:
+    check_params $(head -1 "$last_commit_old_hash_file") $(head -1 "$last_commit_new_hash_file")
+    update
+fi
 
-#######################################################################################
-#                                                                                     #
-# REFERENCES:                                                                         #
-#                                                                                     #
-# - https://stackoverflow.com/a/3910807  - most important parts                       #
-# - https://stackoverflow.com/a/26033230                                              #
-# - https://stackoverflow.com/a/17864475                                              #
-#                                                                                     #
-#######################################################################################
+########################################################################################################################
+#                                                                                                                      #
+# REFERENCES:                                                                                                          #
+#                                                                                                                      #
+# - https://stackoverflow.com/a/3910807  - filtering unwanted paths                                                    #
+# - https://stackoverflow.com/a/26033230                                                                               #
+# - https://stackoverflow.com/a/17864475                                                                               #
+# - https://stackoverflow.com/a/42457384 - combining multiple git histories into one                                   #
+#                                                                                                                      #
+########################################################################################################################
