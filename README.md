@@ -5,7 +5,7 @@ Shell script to remove specified paths from a Git repository with the related hi
 
 1. Prepare a `params.sh` copying from the `sample-params.sh`
 2. Run `git_forget_paths.sh params.sh` to create the repository first time.
-3. Run `git_forget_paths.sh params.sh` againg to update the existing repository from the remote repository.
+3. Run `git_forget_paths.sh params.sh` againg to update the existing repository from the remote repository whenever you want.
 
 # Usage
 
