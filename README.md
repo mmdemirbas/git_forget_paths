@@ -1,11 +1,16 @@
 # git_forget_paths.sh
-Shell script to remove specified paths from a Git repository with the related history.
+Shell script to remove specified paths from a Git repository with
+the related history.
 
 # Quick Start
 
 1. Prepare a `params.sh` copying from the `sample-params.sh`
-2. Run `git_forget_paths.sh params.sh` to create the repository first time.
-3. Run `git_forget_paths.sh params.sh` againg to update the existing repository from the remote repository whenever you want.
+2. Run `git_forget_paths.sh params.sh` to create the repository for the
+   first time. This may take too long.
+3. Run `git_forget_paths.sh params.sh` again to update the existing
+   repository from the remote repository whenever you want, and merge
+   the created/updated branch manually.
+
 
 # Usage
 
@@ -13,13 +18,30 @@ Shell script to remove specified paths from a Git repository with the related hi
 
 Copy `sample-params.sh` as `params.sh` and change per your needs:
 
-- `source_url_or_path`: Location of the source Git repository. This can be a URL of a remote Git repository or a path of a local Git repository path.
-- `target_path`: Path of a non-existant directory to clone the repository into it. Note that `${target_path}.tmp` will be created and used for temporary files, and `${target_path}.bak` will be created and used to backup current state of the repository before modifications.
-- `top_level_paths_to_keep`: An array of top-level files and/or directories to keep. You can specify only top-level file/dir names here, not paths! CAUTION! All of the other versioned top-level directories and files will be removed.
-- `relative_paths_to_delete`: An array of relative paths to delete among the remaining files (`top_level_paths_to_keep`). You can specify deeper relative paths like `x/y/z` here.
-- `tags_to_delete`: An array of patterns that match agains the git tags to be deleted.
+- `source_url_or_path`: Location of the source Git repository.
+  This can be a URL of a remote Git repository or a path of a local
+  Git repository path.
+- `source_branch`: Interested remote branch. No other branch will
+  be fetched from the remote. Equivalent local branch will be created
+  or updated unless it is `master`. In the case of master, always a new
+  branch with a name including current date-time will be created such as
+  `master-2018-06-25T07-23-35`.
+- `target_path`: Path of a non-existant directory to clone
+  the repository into it. Note that also `${target_path}.tmp` will be
+  created and used for temporary files, and `${target_path}.bak` will be
+  created and used to backup current state of the repository before
+  update.
+- `top_level_paths_to_keep`: An array of top-level files and/or
+  directories to keep. You can specify only top-level file/dir names
+  here, not paths! CAUTION! All of the other versioned top-level
+  directories and files will be removed.
+- `relative_paths_to_delete`: An array of relative paths to delete among
+  the remaining files (namely `$top_level_paths_to_keep`).
+  You can specify deeper relative paths like `x/y/z` here.
+- `tags_to_delete`: An array of patterns that match agains the git tags
+  to be deleted.
 
-## Run script for the first time
+## Run the script
 
 After preparing your `params.sh` file, you can run the script like this:
 
@@ -27,46 +49,48 @@ After preparing your `params.sh` file, you can run the script like this:
 git_forget_paths.sh params.sh
 ```
 
-This operation may take very long time depending on your repository size. After completion, you have a folder structure similar to the following:
+This operation may take very long time depending on your repository
+size.
 
-```
-src
-test
-build.gradle
-.last_commit_old_hash
-.last_commit_new_hash
-```
+At this point, you are done until new changes made to the original
+repository.
 
-At this point, you are done.
+## Run the script again to update later
 
-## Run script again later
+After sometime, if development goes on at the original remote
+repository, you may want to apply new commits from the original remote
+repository into your trimmed local repository.
 
-After sometime, if development goes on at the original remote repository, you may want to apply new commits from the original remote repository into your trimmed local repository.
-
-Whenever you want to update your repository, you can run the script again in the same manner:
+Whenever you want to update your repository, you can run the script
+again in the same manner:
 
 ```
 git_forget_paths.sh params.sh
 ```
 
-Note that the new changes will be appended to an automatically created branch instead of the master branch. So, you need to perform following operations manually:
+This will find automatically the commits from both repositories mapping
+to each other, by using `commit date + committer email` as key.
 
-1. Rebase the new branch onto your master branch.
-2. Merge the new branch onto your master branch.
+After update, new changes will be appended to a branch instead of
+the master branch. So, you need to merge the new branch onto your
+master manually, if you want.
 
-#### How updating works?
-To enable updating, we need to know the latest commit hashes from the both repositories mapping to each other. We store this information in the following extra files:
+Note that if `source_branch` is `master`, then a new branch
+will be created with the current date-time everytime you try to update,
+such as `master-2018-06-25T07-23-35`.
 
-```
-.last_commit_old_hash
-.last_commit_new_hash
-```
+If `source_branch` is not `master`, then a branch with the same
+name will be created if doesn't exist or updated if exists.
 
-As the local repository exists, the script knows that you want to update the existing repository and uses the commit hash information to update automatically.
+In the case of unexpected results, you can always rollback previous
+state from the backup under `${target_path}.bak`. Each time you run the
+script to update your repo, a new backup will be created by the name of
+current date-time.
 
 
 # References
 1. https://stackoverflow.com/a/3910807  - filtering unwanted paths
 2. https://stackoverflow.com/a/26033230
 3. https://stackoverflow.com/a/17864475
-4. https://stackoverflow.com/a/42457384 - combining multiple git histories into one
+4. https://stackoverflow.com/a/42457384 - combining multiple git
+   histories into one

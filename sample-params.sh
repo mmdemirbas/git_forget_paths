@@ -3,6 +3,9 @@
 # original code base to process (read-only):
 source_url_or_path="https://github.com/Kotlin/kotlin-koans.git"
 
+# branch to fetch from remote and append to the local
+source_branch="master"
+
 # absolute path to the local repository:
 target_path="kotlin-koans"
 # Will be created if absent or will be updated if present.
