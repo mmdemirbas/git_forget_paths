@@ -86,11 +86,3 @@ In the case of unexpected results, you can always rollback previous
 state from the backup under `${target_path}.bak`. Each time you run the
 script to update your repo, a new backup will be created by the name of
 current date-time.
-
-
-# References
-1. https://stackoverflow.com/a/3910807  - filtering unwanted paths
-2. https://stackoverflow.com/a/26033230
-3. https://stackoverflow.com/a/17864475
-4. https://stackoverflow.com/a/42457384 - combining multiple git
-   histories into one

@@ -13,14 +13,6 @@
 #                                                                                                                      #
 # Provide a parameters.sh file which defines the required parameters as argument to the script.                        #
 #                                                                                                                      #
-#                                                                                                                      #
-# REFERENCES:                                                                                                          #
-#                                                                                                                      #
-# - https://stackoverflow.com/a/3910807  - filtering unwanted paths                                                    #
-# - https://stackoverflow.com/a/26033230                                                                               #
-# - https://stackoverflow.com/a/17864475                                                                               #
-# - https://stackoverflow.com/a/42457384 - combining multiple git histories into one                                   #
-#                                                                                                                      #
 ########################################################################################################################
 
 main() {
@@ -149,12 +141,12 @@ update() {
     git clone "$source_url_or_path" -b "$source_branch" --single-branch "$bare" --bare      || abort "Clone failed: $source_url_or_path"
     cd "$bare"                                                                              || abort "Couldn't cd into $bare"
 
-    git_log_all                > "$oldlog"
-    git_log_committer_and_date > "$oldkeys"
+    git_log_all                "$source_branch" > "$oldlog"
+    git_log_committer_and_date "$source_branch" > "$oldkeys"
 
     cd "$target_path"                                                                       || abort "Couldn't cd into $target_path"
-    git_log_all                > "$newlog"
-    git_log_committer_and_date > "$newkeys"
+    git_log_all                                 > "$newlog"
+    git_log_committer_and_date                  > "$newkeys"
 
     # find latest common commit
     common_commit_key=$(grep --max-count=1 -F -f "$newkeys" "$oldkeys")
@@ -177,11 +169,9 @@ update() {
     require_non_empty "$common_commit_key" "No common commit found! common_commit_key"
 
     # now we need the code only after a known commit:
-    # todo: ideal solution --shallow-exclude doesn't work. So we use shallow-since
 #    git clone "$source_url_or_path" -b "$source_branch" --single-branch "$truncated" --shallow-exclude="$old_commit_hash" || abort
     git clone "$source_url_or_path" -b "$source_branch" --single-branch "$truncated" --shallow-since="$commit_date" || abort "Clone failed: $source_url_or_path"
     cd "$truncated"                                                                           || abort "Couldn't cd into $truncated"
-    git_forget_history_including "$old_commit_hash"
     git_truncate_history
 
     # re-cloning generally reduces the repo size
@@ -191,8 +181,7 @@ update() {
     local backup_parent_path="$target_path.bak"
     local backup_path="$backup_parent_path/$DATE"
     echo "Creating backup at \"$backup_path\"..."
-    mkdir -p "$backup_parent_path"                                                            || abort "Couldn't create $backup_parent_path"
-    cp -R "$target_path" "$backup_path"                                                       || abort "Backup failed! Path: $backup_path"
+    mkdir -p "$backup_parent_path" && cp -R "$target_path" "$backup_path" || abort "Backup failed! Path: $backup_path"
 
     # go back to the graft point of the initial repo and start a branch there
     echo "Stashing any change in target repository before update..."
@@ -210,32 +199,31 @@ update() {
     # -B: create new or checkout existing
     git checkout -B "$target_branch" || abort "\`git checkout \"$target_branch\"\` failed!"
 
-    local remote_branch_tail="$(git log "$remote_branch" --format="%H" | tail -1 || abort "Couldn't get git log!")"
-    require_non_empty "$remote_branch_tail" "No new commit! remote_branch_tail"
+    local effective_old_commit_hash="$(git log "$remote_branch" --format="%H" | tail -1 || abort "Couldn't get git log!")"
+    require_non_empty "$effective_old_commit_hash" "No new commit! effective_old_commit_hash"
 
     # report changes will be made
     echo
     echo "New commits:"
-    local log_format="%C(yellow)%H %C(cyan)%cI %C(red)%ce %C(green)%s %C(reset)"
-    git --no-pager log "$remote_name/$source_branch" --pretty="format:  $log_format"
-#    git --no-pager log "$(git log "$remote_branch" --format=format:"%H" | tail -1)" -n 1 --pretty="format:  from tail: $log_format"
-#    git --no-pager log "$(git log "$remote_branch" --format=format:"%H" | head -1)" -n 1 --pretty="format:    to head: $log_format"
+    git --no-pager log "$remote_name/$source_branch" --pretty="format:%C(auto)%x09%h %C(magenta)%>(27)%ce %C(cyan)%cI %C(dim cyan)%<(15)%cr %C(auto)%d %C(auto)%s%C(reset)" --graph
     echo
 
     # usage: git replace [-f] --graft <commit> [<parent>...]
     echo
     echo "Rewriting history..."
-    git replace --graft "$remote_branch_tail" $new_commit_hash || abort "Failed to replace parent of $remote_branch_tail"
-    git reset --hard "$remote_branch"                          || abort "Failed to hard reset to HEAD of $remote_branch!"
+    git filter-branch --parent-filter "sed \"s/-p ${effective_old_commit_hash}[0-9a-f]*/-p $new_commit_hash/\""  \
+        --tag-name-filter cat --prune-empty -- --all          || abort "Failed to replace $effective_old_commit_hash with $new_commit_hash"
+    git reset --hard "$remote_branch"                         || abort "Failed to hard reset to HEAD of $remote_branch!"
     git remote rm "$remote_name"
     git_delete_backups
+    git_cleanup
 
     echo "Unstashing changes stashed before update..."
     git stash pop
 
     # remove temp files
-    echo "Cleanup temporary files... TODO"
-#    rm -rf "$tmp"
+    echo "Cleanup temporary files..."
+    rm -rf "$tmp"
     rmdir "$tmp_path"
 
     success
@@ -247,13 +235,13 @@ git_log_all() {
     # %cI: committer date-time
     # %ce: committer e-mail
     # %s: commit message
-    git --no-pager log --pretty=format:'%C(yellow)%H %C(cyan)%cI %C(red)%ce %C(reset)%s' --all || abort "Couldn't get git log!"
+    git --no-pager log --pretty=format:'%C(yellow)%H %C(cyan)%cI %C(red)%ce %C(reset)%s' "${1:---all}" || abort "Couldn't get git log!"
 }
 
 git_log_committer_and_date() {
     # %cI: committer date-time
     # %ce: committer e-mail
-    git --no-pager log --pretty=format:'%C(cyan)%cI %C(red)%ce' --all || abort "Couldn't get git log!"
+    git --no-pager log --pretty=format:'%C(cyan)%cI %C(red)%ce' "${1:---all}" || abort "Couldn't get git log!"
 }
 
 # Removes the given paths and related history from the current git repo.
@@ -279,11 +267,6 @@ git_truncate_history() {
     git_delete_backups
     git_cleanup
     rm "$tmp"
-}
-
-git_forget_history_including() {
-    git filter-branch --parent-filter "sed \"s/-p $1[0-9a-f]*//\"" --tag-name-filter cat --prune-empty -- --all  || abort
-    git_delete_backups
 }
 
 # lists top-level files & dirs, ignoring the specified paths.
