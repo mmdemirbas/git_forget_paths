@@ -1,0 +1,8 @@
+build:
+  tests:
+    override:
+      -
+        command: gradle jacocoTestReport
+        coverage:
+          file: 'build/reports/tests/index.html'
+          format: 'jacoco'
